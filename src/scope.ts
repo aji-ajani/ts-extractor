@@ -1,4 +1,4 @@
-export type ScopeLevel = { params: string[] };
+export type ScopeLevel = {params: string[]};
 export type Scope = ScopeLevel[]; // index 0 = innermost (most recently bound)
 
 export function lookup(name: string, scope: Scope): string {

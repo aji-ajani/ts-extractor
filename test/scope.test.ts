@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { lookup } from "../src/scope";
+import {lookup} from "../src/scope";
 
 test("single-param lambda: x is $0", () => {
   const scope = [{ params: ["x"] }];
