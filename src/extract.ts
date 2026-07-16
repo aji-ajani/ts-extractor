@@ -16,10 +16,24 @@ export function convert(node: Node, scope: Scope): string | null {
     }
 
     if (Node.isPrefixUnaryExpression(node)) {
-        if (node.getOperatorToken() !== SyntaxKind.ExclamationToken) return null; // only ! is currently supported
+        const operatorToken = node.getOperatorToken();
         const operand = convert(node.getOperand(), scope);
         if (operand === null) return null;
-        return `(bool_not ${operand})`;
+
+        switch (operatorToken) {
+            case SyntaxKind.ExclamationToken:
+                return `(bool_not ${operand})`;
+            case SyntaxKind.MinusToken:
+                return `(num_neg ${operand})`;
+            case SyntaxKind.PlusToken: {
+                const operandType = node.getOperand().getType();
+                if (operandType.isUnion()) return null; // ambiguous - don't guess
+                if (!operandType.isNumber() && !operandType.isNumberLiteral()) return null;
+                return `(num_pos ${operand})`;
+            }
+            default:
+                return null; // other prefix unary operators not supported yet
+        }
     }
 
     if (Node.isConditionalExpression(node)) {

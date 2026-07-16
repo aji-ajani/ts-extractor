@@ -188,9 +188,30 @@ test("double negation nests", () => {
     );
 });
 
-test("unsupported prefix unary operator (unary minus) returns null", () => {
+test("unary minus", () => {
     assert.equal(
         convert(parseExpr("-x"), noScope),
+        "(num_neg x)"
+    );
+});
+
+test("unary plus on declared number operand", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const n: number;\n+n;"), noScope),
+        "(num_pos n)"
+    );
+});
+
+test("unary plus on untyped/any operand returns null", () => {
+    assert.equal(
+        convert(parseExpr("+x"), noScope),
+        null
+    );
+});
+
+test("unary plus on union-typed operand returns null", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const u: string | number;\n+u;"), noScope),
         null
     );
 });
