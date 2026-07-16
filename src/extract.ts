@@ -1,5 +1,6 @@
 import {Node, SyntaxKind} from "ts-morph"
 import {Scope, lookup} from "./scope"
+import {isPure} from "./purity"
 
 export function convert(node: Node, scope: Scope): string | null {
     if (Node.isNumericLiteral(node)) {
@@ -77,6 +78,7 @@ export function convert(node: Node, scope: Scope): string | null {
         const params = node.getParameters().map((p) => p.getName());
         const body: Node = node.getBody();
         if (Node.isBlock(body)) return null; // block bodies not supported yet
+        if (!isPure(body)) return null; // impure closures are not DSR-eligible
         const inner = convert(body, [{params}, ...scope]);
         if (inner === null) return null; // propagate body parse failure upwards
         return `(lam ${inner})`

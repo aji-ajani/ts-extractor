@@ -57,6 +57,13 @@ test("multi-param arrow function with nested arithmetic", () => {
     );
 });
 
+test("arrow function with impure body (console.log) returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x) => console.log(x)"), noScope),
+        null
+    );
+});
+
 // String concatenation
 test("string literal encodes as JSON-quoted string", () => {
     assert.equal(
