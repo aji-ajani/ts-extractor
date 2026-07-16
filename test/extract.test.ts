@@ -231,6 +231,105 @@ test("ternary over a comparison condition", () => {
     );
 });
 
+// Array methods
+test("array map", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.map(x => x * 2);"), noScope),
+        "(Array_map xs (lam (num_mul $0 2)))"
+    );
+});
+
+test("array filter", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.filter(x => x > 0);"), noScope),
+        "(Array_filter xs (lam (num_gt $0 0)))"
+    );
+});
+
+test("array flatMap", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.flatMap(x => x);"), noScope),
+        "(Array_flatMap xs (lam $0))"
+    );
+});
+
+test("array find", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.find(x => x > 0);"), noScope),
+        "(Array_find xs (lam (num_gt $0 0)))"
+    );
+});
+
+test("array some", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.some(x => x > 0);"), noScope),
+        "(Array_some xs (lam (num_gt $0 0)))"
+    );
+});
+
+test("array every", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.every(x => x > 0);"), noScope),
+        "(Array_every xs (lam (num_gt $0 0)))"
+    );
+});
+
+test("non-array receiver is not encoded as an array method", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const obj: { map: (f: unknown) => unknown };\nobj.map(x => x);"), noScope),
+        null
+    );
+});
+
+test("unrecognized method name on array receiver returns null", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.join(',');"), noScope),
+        null
+    );
+});
+
+test("array method call with extra argument returns null", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.map(x => x, undefined);"), noScope),
+        null
+    );
+});
+
+test("array method chaining", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.map(x => x * 2).filter(x => x > 0);"), noScope),
+        "(Array_filter (Array_map xs (lam (num_mul $0 2))) (lam (num_gt $0 0)))"
+    );
+});
+
+test("array method callback as a free identifier (not an arrow function)", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\ndeclare const double: (x: number) => number;\nxs.map(double);"), noScope),
+        "(Array_map xs double)"
+    );
+});
+
+test("array method callback that fails the purity check returns null", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.map(x => console.log(x));"), noScope),
+        null
+    );
+});
+
+test("array reduce with initial value", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.reduce((acc, x) => acc + x, 0);"), noScope),
+        "(Array_reduce xs (lam (num_add $0 $1)) 0)"
+    );
+});
+
+test("array reduce without initial value returns null", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.reduce((acc, x) => acc + x);"), noScope),
+        null
+    );
+});
+
 // Unsupported node
 test("unsupported node (call expression) returns null", () => {
     assert.equal(

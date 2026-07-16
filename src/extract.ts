@@ -2,6 +2,16 @@ import {Node, SyntaxKind} from "ts-morph"
 import {Scope, lookup} from "./scope"
 import {isPure} from "./purity"
 
+const ARRAY_OPS: Record<string, string> = {
+    map: "Array_map",
+    filter: "Array_filter",
+    flatMap: "Array_flatMap",
+    find: "Array_find",
+    some: "Array_some",
+    every: "Array_every",
+    // reduce is handled separately
+};
+
 export function convert(node: Node, scope: Scope): string | null {
     if (Node.isNumericLiteral(node)) {
         return node.getText();
@@ -97,5 +107,32 @@ export function convert(node: Node, scope: Scope): string | null {
         if (inner === null) return null; // propagate body parse failure upwards
         return `(lam ${inner})`
     }
+
+    if (Node.isCallExpression(node)) {
+        const callee = node.getExpression();
+        if (!Node.isPropertyAccessExpression(callee)) return null; // only method calls are supported
+
+        const receiverNode = callee.getExpression();
+        if (!receiverNode.getType().isArray()) return null; // only Array.* methods are encoded
+
+        const methodName = callee.getName();
+        const args = node.getArguments();
+        const receiver = convert(receiverNode, scope);
+        if (receiver === null) return null;
+
+        if (methodName in ARRAY_OPS && args.length === 1) {
+            const callback = convert(args[0], scope);
+            if (callback === null) return null;
+            return `(${ARRAY_OPS[methodName]} ${receiver} ${callback})`;
+        }
+
+        if (methodName === "reduce" && args.length === 2) {
+            const callback = convert(args[0], scope);
+            const init = convert(args[1], scope);
+            if (callback === null || init === null) return null;
+            return `(Array_reduce ${receiver} ${callback} ${init})`;
+        }
+    }
+
     return null;
 }
