@@ -1,30 +1,8 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import {Project, Node} from "ts-morph"
 import {convert} from "../src/extract"
 import {Scope} from "../src/scope"
-
-// Helpers
-function parseExpr(src: string): Node {
-    const project = new Project({useInMemoryFileSystem: true})
-    const file = project.createSourceFile("scratch.ts", `${src};`)
-    const stmt = file.getStatements()[0];
-    if (!Node.isExpressionStatement(stmt)) {
-        throw new Error(`expected expression statement, got: ${stmt.getKindName()}`);
-    }
-    return stmt.getExpression()
-}
-
-function parseLastExpr(src: string): Node {
-    const project = new Project({useInMemoryFileSystem: true})
-    const file = project.createSourceFile("scratch.ts", src)
-    const statements = file.getStatements();
-    const stmt = statements[statements.length - 1];
-    if (!Node.isExpressionStatement(stmt)) {
-        throw new Error(`expected expression statement, got: ${stmt.getKindName()}`);
-    }
-    return stmt.getExpression()
-}
+import {parseExpr, parseLastExpr} from "./helpers"
 
 const noScope: Scope = [];
 

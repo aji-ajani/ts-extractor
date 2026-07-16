@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --require ts-node/register --test test/scope.test.ts test/extract.test.ts"
+    "test": "node --require ts-node/register --test test/scope.test.ts test/extract.test.ts test/purity.test.ts"
   },
   "keywords": [],
   "author": "",
