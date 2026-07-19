@@ -235,42 +235,42 @@ test("ternary over a comparison condition", () => {
 test("array map", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.map(x => x * 2);"), noScope),
-        "(Array_map xs (lam (num_mul $0 2)))"
+        "(array_map xs (lam (num_mul $0 2)))"
     );
 });
 
 test("array filter", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.filter(x => x > 0);"), noScope),
-        "(Array_filter xs (lam (num_gt $0 0)))"
+        "(array_filter xs (lam (num_gt $0 0)))"
     );
 });
 
 test("array flatMap", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.flatMap(x => x);"), noScope),
-        "(Array_flatMap xs (lam $0))"
+        "(array_flatMap xs (lam $0))"
     );
 });
 
 test("array find", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.find(x => x > 0);"), noScope),
-        "(Array_find xs (lam (num_gt $0 0)))"
+        "(array_find xs (lam (num_gt $0 0)))"
     );
 });
 
 test("array some", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.some(x => x > 0);"), noScope),
-        "(Array_some xs (lam (num_gt $0 0)))"
+        "(array_some xs (lam (num_gt $0 0)))"
     );
 });
 
 test("array every", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.every(x => x > 0);"), noScope),
-        "(Array_every xs (lam (num_gt $0 0)))"
+        "(array_every xs (lam (num_gt $0 0)))"
     );
 });
 
@@ -298,14 +298,14 @@ test("array method call with extra argument returns null", () => {
 test("array method chaining", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.map(x => x * 2).filter(x => x > 0);"), noScope),
-        "(Array_filter (Array_map xs (lam (num_mul $0 2))) (lam (num_gt $0 0)))"
+        "(array_filter (array_map xs (lam (num_mul $0 2))) (lam (num_gt $0 0)))"
     );
 });
 
 test("array method callback as a free identifier (not an arrow function)", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\ndeclare const double: (x: number) => number;\nxs.map(double);"), noScope),
-        "(Array_map xs double)"
+        "(array_map xs double)"
     );
 });
 
@@ -319,7 +319,7 @@ test("array method callback that fails the purity check returns null", () => {
 test("array reduce with initial value", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.reduce((acc, x) => acc + x, 0);"), noScope),
-        "(Array_reduce xs (lam (num_add $0 $1)) 0)"
+        "(array_reduce xs (lam (num_add $0 $1)) 0)"
     );
 });
 

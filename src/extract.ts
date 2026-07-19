@@ -3,12 +3,12 @@ import {Scope, lookup} from "./scope"
 import {isPure} from "./purity"
 
 const ARRAY_OPS: Record<string, string> = {
-    map: "Array_map",
-    filter: "Array_filter",
-    flatMap: "Array_flatMap",
-    find: "Array_find",
-    some: "Array_some",
-    every: "Array_every",
+    map: "array_map",
+    filter: "array_filter",
+    flatMap: "array_flatMap",
+    find: "array_find",
+    some: "array_some",
+    every: "array_every",
     // reduce is handled separately
 };
 
@@ -130,7 +130,7 @@ export function convert(node: Node, scope: Scope): string | null {
             const callback = convert(args[0], scope);
             const init = convert(args[1], scope);
             if (callback === null || init === null) return null;
-            return `(Array_reduce ${receiver} ${callback} ${init})`;
+            return `(array_reduce ${receiver} ${callback} ${init})`;
         }
     }
 
