@@ -1,4 +1,4 @@
-import {Node, SyntaxKind} from "ts-morph"
+import {Node, SyntaxKind, Statement, VariableDeclarationKind, SourceFile} from "ts-morph"
 import {Scope, lookup} from "./scope"
 import {isPure} from "./purity"
 
@@ -11,6 +11,86 @@ const ARRAY_OPS: Record<string, string> = {
     every: "array_every",
     // reduce is handled separately
 };
+
+function reachableStatements(statements: Statement[]): Statement[] {
+    const returnIndex = statements.findIndex((s) => Node.isReturnStatement(s));
+    return returnIndex === -1 ? statements : statements.slice(0, returnIndex + 1);
+}
+
+function convertBlockStatements(statements: Statement[], index: number, scope: Scope): string | null {
+    if (index === statements.length) return "done"; // ran out of statements — no explicit return
+
+    const stmt = statements[index];
+
+    if (Node.isReturnStatement(stmt)) {
+        // Terminal unconditionally: the language has no control flow, so a `return` is never
+        // conditional, and anything textually after it is provably unreachable — dropped here,
+        // not converted, regardless of what (if anything) follows in `statements`.
+        const returnExpr = stmt.getExpression();
+        if (returnExpr === undefined) return "done"; // bare `return;`
+        return convert(returnExpr, scope);
+    }
+
+    if (Node.isVariableStatement(stmt)) {
+        if (stmt.getDeclarationKind() === VariableDeclarationKind.Var) return null; // var not supported
+
+        const declarations = stmt.getDeclarations();
+        if (declarations.length !== 1) return null; // multi-declarator statements not supported
+
+        const nameNode = declarations[0].getNameNode();
+        if (!Node.isIdentifier(nameNode)) return null; // destructuring not supported
+
+        const initializer = declarations[0].getInitializer();
+        if (initializer === undefined) return null; // no value to bind
+
+        const value = convert(initializer, scope);
+        if (value === null) return null;
+
+        const rest = convertBlockStatements(statements, index + 1, [{params: [nameNode.getText()]}, ...scope]);
+        if (rest === null) return null;
+        return `(define ${value} ${rest})`;
+    }
+
+    if (Node.isExpressionStatement(stmt)) {
+        const value = convert(stmt.getExpression(), scope);
+        if (value === null) return null;
+
+        const rest = convertBlockStatements(statements, index + 1, scope);
+        if (rest === null) return null;
+        return `(seq ${value} ${rest})`;
+    }
+
+    if (
+        Node.isImportDeclaration(stmt) ||
+        Node.isImportEqualsDeclaration(stmt) ||
+        Node.isExportDeclaration(stmt) ||
+        Node.isTypeAliasDeclaration(stmt) ||
+        Node.isInterfaceDeclaration(stmt)
+    ) {
+        // Erased at compile time (or, for imports, no DSL concept of module loading) — no
+        // runtime value to encode, so skip silently rather than rejecting the whole file.
+        return convertBlockStatements(statements, index + 1, scope);
+    }
+
+    if (Node.isExportAssignment(stmt)) {
+        // Not terminal like return: export default/export = does not stop module evaluation,
+        // so statements after it still execute and must still be converted, not dropped.
+        const value = convert(stmt.getExpression(), scope);
+        if (value === null) return null;
+
+        const rest = convertBlockStatements(statements, index + 1, scope);
+        if (rest === null) return null;
+        return `(seq ${value} ${rest})`;
+    }
+
+    return null; // unsupported statement kind (if/for/while/throw/try/function/class/enum/namespace, ...)
+}
+
+export function convertProgram(sourceFile: SourceFile): string | null {
+    const statements = sourceFile.getStatements();
+    if (!statements.every((s) => isPure(s))) return null;
+    return convertBlockStatements(statements, 0, []);
+}
 
 export function convert(node: Node, scope: Scope): string | null {
     if (Node.isNumericLiteral(node)) {
@@ -101,7 +181,15 @@ export function convert(node: Node, scope: Scope): string | null {
     if (Node.isArrowFunction(node)) {
         const params = node.getParameters().map((p) => p.getName());
         const body: Node = node.getBody();
-        if (Node.isBlock(body)) return null; // block bodies not supported yet
+
+        if (Node.isBlock(body)) {
+            const statements = reachableStatements(body.getStatements());
+            if (!statements.every((s) => isPure(s))) return null; // impure closures are not DSR-eligible; dead code after `return` is excluded
+            const inner = convertBlockStatements(statements, 0, [{params}, ...scope]);
+            if (inner === null) return null;
+            return `(lam ${inner})`;
+        }
+
         if (!isPure(body)) return null; // impure closures are not DSR-eligible
         const inner = convert(body, [{params}, ...scope]);
         if (inner === null) return null; // propagate body parse failure upwards

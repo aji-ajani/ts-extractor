@@ -1,4 +1,4 @@
-import {Project, Node} from "ts-morph";
+import {Project, Node, SourceFile} from "ts-morph";
 
 export function parseExpr(src: string): Node {
     const project = new Project({useInMemoryFileSystem: true});
@@ -25,4 +25,9 @@ export function parseStatement(src: string): Node {
     const project = new Project({useInMemoryFileSystem: true});
     const file = project.createSourceFile("scratch.ts", src);
     return file.getStatements()[0];
+}
+
+export function parseFile(src: string): SourceFile {
+    const project = new Project({useInMemoryFileSystem: true});
+    return project.createSourceFile("scratch.ts", src);
 }

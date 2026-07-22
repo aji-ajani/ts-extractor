@@ -1,8 +1,8 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import {convert} from "../src/extract"
+import {convert, convertProgram} from "../src/extract"
 import {Scope} from "../src/scope"
-import {parseExpr, parseLastExpr} from "./helpers"
+import {parseExpr, parseLastExpr, parseFile} from "./helpers"
 
 const noScope: Scope = [];
 
@@ -61,6 +61,140 @@ test("arrow function with impure body (console.log) returns null", () => {
     assert.equal(
         convert(parseExpr("(x) => console.log(x)"), noScope),
         null
+    );
+});
+
+// Block-body arrow functions (define/seq)
+test("block body with single const declaration and return", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { const y = x * 2; return y + 1; }"), noScope),
+        "(lam (define (num_mul $0 2) (num_add $0 1)))"
+    );
+});
+
+test("block body with single let declaration and return (identical to const)", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { let y = x * 2; return y + 1; }"), noScope),
+        "(lam (define (num_mul $0 2) (num_add $0 1)))"
+    );
+});
+
+test("block body with two chained const declarations", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { const a = x + 1; const b = a * 2; return b; }"), noScope),
+        "(lam (define (num_add $0 1) (define (num_mul $0 2) $0)))"
+    );
+});
+
+test("block body with var declaration returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { var y = 1; return y; }"), noScope),
+        null
+    );
+});
+
+test("block body with destructured const returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { const {a} = x; return a; }"), noScope),
+        null
+    );
+});
+
+test("block body with multi-declarator const returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { const a = 1, b = 2; return a + b; }"), noScope),
+        null
+    );
+});
+
+test("empty block body encodes as done", () => {
+    assert.equal(
+        convert(parseExpr("() => {}"), noScope),
+        "(lam done)"
+    );
+});
+
+test("block body with no return statement encodes with done as the tail", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { const a = x; }"), noScope),
+        "(lam (define $0 done))"
+    );
+});
+
+test("block body with bare return (no value) encodes as done", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { const a = 1; return; }"), noScope),
+        "(lam (define 1 done))"
+    );
+});
+
+test("block body with a let that is later reassigned returns null (via existing purity gate)", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { let y = 1; y = 2; return y; }"), noScope),
+        null
+    );
+});
+
+test("block body with impure statement (console.log) returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { console.log(x); return x; }"), noScope),
+        null
+    );
+});
+
+test("block body with a control-flow statement (if) returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { const a = 1; if (a > 0) {} return a; }"), noScope),
+        null
+    );
+});
+
+test("return statement followed by unreachable code drops the unreachable code", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { return x; const a = 1; }"), noScope),
+        "(lam $0)"
+    );
+});
+
+test("return statement followed by impure unreachable code does not affect purity", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { return x; console.log(\"dead\"); }"), noScope),
+        "(lam $0)"
+    );
+});
+
+test("block body with bare expression statement then return", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { x > 0; return x + 1; }"), noScope),
+        "(lam (seq (num_gt $0 0) (num_add $0 1)))"
+    );
+});
+
+test("block body mixing define and seq", () => {
+    assert.equal(
+        convert(parseExpr("(x, y) => { const a = 1; y; return a + x; }"), noScope),
+        "(lam (define 1 (seq $2 (num_add $0 $1))))"
+    );
+});
+
+test("block body with bare expression statement and no return encodes with done", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { x > 0; }"), noScope),
+        "(lam (seq (num_gt $0 0) done))"
+    );
+});
+
+test("block body with local interface and type declarations is skipped transparently", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { interface Point { y: number } type Foo = number; return x; }"), noScope),
+        "(lam $0)"
+    );
+});
+
+test("block body with a local type declaration does not shift de Bruijn indices of surrounding statements", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { type Foo = number; const a = x + 1; return a; }"), noScope),
+        "(lam (define (num_add $0 1) $0))"
     );
 });
 
@@ -335,5 +469,83 @@ test("unsupported node (call expression) returns null", () => {
     assert.equal(
         convert(parseExpr("f(x)"), noScope),
         null
+    );
+});
+
+// Top-level (file-level) define/seq sequencing
+test("file with const and expression statements encodes with no lam wrapper", () => {
+    assert.equal(
+        convertProgram(parseFile("const a = 1;\na + 2;")),
+        "(define 1 (seq (num_add $0 2) done))"
+    );
+});
+
+test("empty file encodes as bare done", () => {
+    assert.equal(
+        convertProgram(parseFile("")),
+        "done"
+    );
+});
+
+test("file with an impure top-level statement returns null", () => {
+    assert.equal(
+        convertProgram(parseFile('console.log(1);\nconst a = 1;')),
+        null
+    );
+});
+
+test("file with a top-level function declaration returns null", () => {
+    assert.equal(
+        convertProgram(parseFile("function foo() { return 1; }")),
+        null
+    );
+});
+
+test("file with a top-level class declaration returns null", () => {
+    assert.equal(
+        convertProgram(parseFile("class Foo {}")),
+        null
+    );
+});
+
+test("file with a top-level enum declaration returns null", () => {
+    assert.equal(
+        convertProgram(parseFile("enum Color { Red, Green }")),
+        null
+    );
+});
+
+test("export const is still recognized as a VariableStatement", () => {
+    assert.equal(
+        convertProgram(parseFile("export const x = 1;\nx + 1;")),
+        "(define 1 (seq (num_add $0 1) done))"
+    );
+});
+
+test("file with a leading import statement skips it transparently", () => {
+    assert.equal(
+        convertProgram(parseFile('import {foo} from "./foo";\nconst a = 1;\na + 2;')),
+        "(define 1 (seq (num_add $0 2) done))"
+    );
+});
+
+test("interleaved type and interface declarations are skipped transparently", () => {
+    assert.equal(
+        convertProgram(parseFile("type Foo = number;\nconst a: Foo = 1;\ninterface Bar { x: number }\na + 1;")),
+        "(define 1 (seq (num_add $0 1) done))"
+    );
+});
+
+test("export declaration (re-export) is skipped transparently", () => {
+    assert.equal(
+        convertProgram(parseFile('const a = 1;\nexport {a};\na + 1;')),
+        "(define 1 (seq (num_add $0 1) done))"
+    );
+});
+
+test("export default is encoded as seq, not terminal — later statements still convert", () => {
+    assert.equal(
+        convertProgram(parseFile("const a = 1;\nexport default a + 1;\na + 2;")),
+        "(define 1 (seq (num_add $0 1) (seq (num_add $0 2) done)))"
     );
 });
