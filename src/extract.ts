@@ -1,4 +1,4 @@
-import {Node, SyntaxKind, Statement, VariableDeclarationKind, SourceFile} from "ts-morph"
+import {Node, SyntaxKind, Statement, VariableDeclarationKind, SourceFile, IfStatement} from "ts-morph"
 import {Scope, lookup} from "./scope"
 import {isPure} from "./purity"
 
@@ -17,18 +17,73 @@ function reachableStatements(statements: Statement[]): Statement[] {
     return returnIndex === -1 ? statements : statements.slice(0, returnIndex + 1);
 }
 
+function isBlockPure(statements: Statement[]): boolean {
+    return reachableStatements(statements).every(isStatementPure);
+}
+
+function isStatementPure(stmt: Statement): boolean {
+    if (!Node.isIfStatement(stmt)) return isPure(stmt);
+
+    if (!isPure(stmt.getExpression())) return false;
+
+    const thenStmt = stmt.getThenStatement();
+    if (!Node.isBlock(thenStmt)) return isPure(stmt); // braceless then — conversion rejects it anyway
+
+    if (!isBlockPure(thenStmt.getStatements())) return false;
+
+    const elseStmt = stmt.getElseStatement();
+    if (elseStmt === undefined) return true;
+    if (Node.isIfStatement(elseStmt)) return isStatementPure(elseStmt);
+    if (Node.isBlock(elseStmt)) return isBlockPure(elseStmt.getStatements());
+    return isPure(elseStmt); // braceless else — conversion rejects it anyway
+}
+
+function convertElseBranch(stmt: Statement | undefined, scope: Scope): string | null {
+    if (stmt === undefined) return "done"; // no else clause
+
+    if (Node.isIfStatement(stmt)) return convertIfStatement(stmt, scope); // else if
+
+    if (Node.isBlock(stmt)) return convertBlockStatements(stmt.getStatements(), 0, scope);
+
+    return null; // braceless else (e.g. `else foo();`) not supported
+}
+
+function convertIfStatement(stmt: IfStatement, scope: Scope): string | null {
+    const condNode = stmt.getExpression();
+    const condType = condNode.getType();
+    if (!condType.isBoolean() && !condType.isBooleanLiteral()) return null; // non-boolean (incl. unions) — don't guess a truthiness coercion
+
+    const cond = convert(condNode, scope);
+    if (cond === null) return null;
+
+    const thenStmt = stmt.getThenStatement();
+    if (!Node.isBlock(thenStmt)) return null; // braceless then (e.g. `if (c) foo();`) not supported
+
+    const thenChain = convertBlockStatements(thenStmt.getStatements(), 0, scope);
+    if (thenChain === null) return null;
+
+    const elseChain = convertElseBranch(stmt.getElseStatement(), scope);
+    if (elseChain === null) return null;
+
+    return `(if ${cond} ${thenChain} ${elseChain})`;
+}
+
 function convertBlockStatements(statements: Statement[], index: number, scope: Scope): string | null {
     if (index === statements.length) return "done"; // ran out of statements — no explicit return
 
     const stmt = statements[index];
 
     if (Node.isReturnStatement(stmt)) {
-        // Terminal unconditionally: the language has no control flow, so a `return` is never
-        // conditional, and anything textually after it is provably unreachable — dropped here,
-        // not converted, regardless of what (if anything) follows in `statements`.
+        // Terminal unconditionally: the only other source of control transfer is `if`, whose
+        // branches recurse through this same function — so anything textually after a `return`
+        // is provably unreachable, dropped here rather than converted, regardless of what (if
+        // anything) follows in `statements`.
         const returnExpr = stmt.getExpression();
-        if (returnExpr === undefined) return "done"; // bare `return;`
-        return convert(returnExpr, scope);
+        if (returnExpr === undefined) return "(return done)"; // bare `return;`
+
+        const value = convert(returnExpr, scope);
+        if (value === null) return null;
+        return `(return ${value})`;
     }
 
     if (Node.isVariableStatement(stmt)) {
@@ -60,6 +115,17 @@ function convertBlockStatements(statements: Statement[], index: number, scope: S
         return `(seq ${value} ${rest})`;
     }
 
+    if (Node.isIfStatement(stmt)) {
+        const ifTerm = convertIfStatement(stmt, scope);
+        if (ifTerm === null) return null;
+
+        if (index + 1 === statements.length) return ifTerm; // last statement — no seq wrapper, mirrors a terminal return's value
+
+        const rest = convertBlockStatements(statements, index + 1, scope);
+        if (rest === null) return null;
+        return `(seq ${ifTerm} ${rest})`;
+    }
+
     if (
         Node.isImportDeclaration(stmt) ||
         Node.isImportEqualsDeclaration(stmt) ||
@@ -83,12 +149,12 @@ function convertBlockStatements(statements: Statement[], index: number, scope: S
         return `(seq ${value} ${rest})`;
     }
 
-    return null; // unsupported statement kind (if/for/while/throw/try/function/class/enum/namespace, ...)
+    return null; // unsupported statement kind (for/while/throw/try/function/class/enum/namespace, ...)
 }
 
 export function convertProgram(sourceFile: SourceFile): string | null {
     const statements = sourceFile.getStatements();
-    if (!statements.every((s) => isPure(s))) return null;
+    if (!isBlockPure(statements)) return null;
     return convertBlockStatements(statements, 0, []);
 }
 
@@ -103,6 +169,10 @@ export function convert(node: Node, scope: Scope): string | null {
 
     if (Node.isIdentifier(node)) {
         return lookup(node.getText(), scope);
+    }
+
+    if (Node.isTrueLiteral(node) || Node.isFalseLiteral(node)) {
+        return node.getText(); // "true" / "false"
     }
 
     if (Node.isPrefixUnaryExpression(node)) {
@@ -184,7 +254,7 @@ export function convert(node: Node, scope: Scope): string | null {
 
         if (Node.isBlock(body)) {
             const statements = reachableStatements(body.getStatements());
-            if (!statements.every((s) => isPure(s))) return null; // impure closures are not DSR-eligible; dead code after `return` is excluded
+            if (!isBlockPure(statements)) return null; // impure closures are not DSR-eligible; dead code after `return` (including inside if-branches) is excluded
             const inner = convertBlockStatements(statements, 0, [{params}, ...scope]);
             if (inner === null) return null;
             return `(lam ${inner})`;

@@ -58,3 +58,7 @@ test("impurity nested inside a ternary branch is detected", () => {
 test("push on a non-array receiver is still flagged (name-based heuristic, documented limitation)", () => {
     assert.equal(isPure(parseExpr("obj.push(x)")), false);
 });
+
+test("impurity nested inside an if-statement's then-branch is detected", () => {
+    assert.equal(isPure(parseStatement("if (c) { console.log(x); }")), false);
+});

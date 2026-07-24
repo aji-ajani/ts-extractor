@@ -68,21 +68,21 @@ test("arrow function with impure body (console.log) returns null", () => {
 test("block body with single const declaration and return", () => {
     assert.equal(
         convert(parseExpr("(x) => { const y = x * 2; return y + 1; }"), noScope),
-        "(lam (define (num_mul $0 2) (num_add $0 1)))"
+        "(lam (define (num_mul $0 2) (return (num_add $0 1))))"
     );
 });
 
 test("block body with single let declaration and return (identical to const)", () => {
     assert.equal(
         convert(parseExpr("(x) => { let y = x * 2; return y + 1; }"), noScope),
-        "(lam (define (num_mul $0 2) (num_add $0 1)))"
+        "(lam (define (num_mul $0 2) (return (num_add $0 1))))"
     );
 });
 
 test("block body with two chained const declarations", () => {
     assert.equal(
         convert(parseExpr("(x) => { const a = x + 1; const b = a * 2; return b; }"), noScope),
-        "(lam (define (num_add $0 1) (define (num_mul $0 2) $0)))"
+        "(lam (define (num_add $0 1) (define (num_mul $0 2) (return $0))))"
     );
 });
 
@@ -121,10 +121,10 @@ test("block body with no return statement encodes with done as the tail", () => 
     );
 });
 
-test("block body with bare return (no value) encodes as done", () => {
+test("block body with bare return (no value) encodes as (return done)", () => {
     assert.equal(
         convert(parseExpr("(x) => { const a = 1; return; }"), noScope),
-        "(lam (define 1 done))"
+        "(lam (define 1 (return done)))"
     );
 });
 
@@ -142,9 +142,9 @@ test("block body with impure statement (console.log) returns null", () => {
     );
 });
 
-test("block body with a control-flow statement (if) returns null", () => {
+test("block body with a for-loop still returns null (for/while remain unsupported)", () => {
     assert.equal(
-        convert(parseExpr("(x) => { const a = 1; if (a > 0) {} return a; }"), noScope),
+        convert(parseExpr("(x) => { const a = 1; for (;;) {} return a; }"), noScope),
         null
     );
 });
@@ -152,28 +152,28 @@ test("block body with a control-flow statement (if) returns null", () => {
 test("return statement followed by unreachable code drops the unreachable code", () => {
     assert.equal(
         convert(parseExpr("(x) => { return x; const a = 1; }"), noScope),
-        "(lam $0)"
+        "(lam (return $0))"
     );
 });
 
 test("return statement followed by impure unreachable code does not affect purity", () => {
     assert.equal(
         convert(parseExpr("(x) => { return x; console.log(\"dead\"); }"), noScope),
-        "(lam $0)"
+        "(lam (return $0))"
     );
 });
 
 test("block body with bare expression statement then return", () => {
     assert.equal(
         convert(parseExpr("(x) => { x > 0; return x + 1; }"), noScope),
-        "(lam (seq (num_gt $0 0) (num_add $0 1)))"
+        "(lam (seq (num_gt $0 0) (return (num_add $0 1))))"
     );
 });
 
 test("block body mixing define and seq", () => {
     assert.equal(
         convert(parseExpr("(x, y) => { const a = 1; y; return a + x; }"), noScope),
-        "(lam (define 1 (seq $2 (num_add $0 $1))))"
+        "(lam (define 1 (seq $2 (return (num_add $0 $1)))))"
     );
 });
 
@@ -187,14 +187,14 @@ test("block body with bare expression statement and no return encodes with done"
 test("block body with local interface and type declarations is skipped transparently", () => {
     assert.equal(
         convert(parseExpr("(x) => { interface Point { y: number } type Foo = number; return x; }"), noScope),
-        "(lam $0)"
+        "(lam (return $0))"
     );
 });
 
 test("block body with a local type declaration does not shift de Bruijn indices of surrounding statements", () => {
     assert.equal(
         convert(parseExpr("(x) => { type Foo = number; const a = x + 1; return a; }"), noScope),
-        "(lam (define (num_add $0 1) $0))"
+        "(lam (define (num_add $0 1) (return $0)))"
     );
 });
 
@@ -365,6 +365,21 @@ test("ternary over a comparison condition", () => {
     );
 });
 
+// Boolean literals
+test("true literal", () => {
+    assert.equal(
+        convert(parseExpr("true"), noScope),
+        "true"
+    );
+});
+
+test("false literal", () => {
+    assert.equal(
+        convert(parseExpr("false"), noScope),
+        "false"
+    );
+});
+
 // Array methods
 test("array map", () => {
     assert.equal(
@@ -468,6 +483,98 @@ test("array reduce without initial value returns null", () => {
 test("unsupported node (call expression) returns null", () => {
     assert.equal(
         convert(parseExpr("f(x)"), noScope),
+        null
+    );
+});
+
+// if / else if / else
+test("if/else as the last statement of a block, both branches returning, sits directly in tail position", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { if (x > 0) { return x; } else { return -x; } }"), noScope),
+        "(lam (if (num_gt $0 0) (return $0) (return (num_neg $0))))"
+    );
+});
+
+test("terminal guard clause with no else — else child is done", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { if (x < 0) { return 0; } }"), noScope),
+        "(lam (if (num_lt $0 0) (return 0) done))"
+    );
+});
+
+test("if with no else, more code follows — else child is done, rest is seq's second child", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { if (x > 0) { x * 2; } x + 1; }"), noScope),
+        "(lam (seq (if (num_gt $0 0) (seq (num_mul $0 2) done) done) (seq (num_add $0 1) done)))"
+    );
+});
+
+test("else if chains to a nested if with no extra operator", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { if (x > 0) { return 1; } else if (x < 0) { return -1; } else { return 0; } }"), noScope),
+        "(lam (if (num_gt $0 0) (return 1) (if (num_lt $0 0) (return (num_neg 1)) (return 0))))"
+    );
+});
+
+test("if condition of plain boolean type (not a comparison) is accepted", () => {
+    assert.equal(
+        convert(parseExpr("(x: boolean) => { if (x) { return 1; } return 0; }"), noScope),
+        "(lam (seq (if $0 (return 1) done) (return 0)))"
+    );
+});
+
+test("if condition with a literal boolean is accepted", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { if (true) { return 1; } return 0; }"), noScope),
+        "(lam (seq (if true (return 1) done) (return 0)))"
+    );
+});
+
+test("if condition with non-boolean numeric type returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x: number) => { if (x) { return 1; } return 0; }"), noScope),
+        null
+    );
+});
+
+test("if condition with non-boolean (truthy-checked) union type returns null", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const u: string | undefined;\n(x: number) => { if (u) { return 1; } return 0; };"), noScope),
+        null
+    );
+});
+
+test("braceless if-then (no block) is unsupported", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { if (x > 0) x; return 0; }"), noScope),
+        null
+    );
+});
+
+test("braceless else (no block, no else-if) is unsupported", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { if (x > 0) { return 1; } else return 0; }"), noScope),
+        null
+    );
+});
+
+test("while-loop still returns null (for/while remain unsupported)", () => {
+    assert.equal(
+        convert(parseExpr("(x) => { while (true) {} return x; }"), noScope),
+        null
+    );
+});
+
+test("dead code after a nested return inside an if-branch does not affect purity", () => {
+    assert.equal(
+        convert(parseExpr('(x) => { if (x > 0) { return 1; console.log("dead"); } return 0; }'), noScope),
+        "(lam (seq (if (num_gt $0 0) (return 1) done) (return 0)))"
+    );
+});
+
+test("impurity that runs before a return inside an if-branch is still rejected", () => {
+    assert.equal(
+        convert(parseExpr('(x) => { if (x > 0) { console.log(x); return 1; } return 0; }'), noScope),
         null
     );
 });
