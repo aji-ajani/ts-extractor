@@ -46,14 +46,14 @@ test("free identifier in arithmetic", () => {
 test("single-param arrow function with arithmetic body", () => {
     assert.equal(
         convert(parseExpr("(x) => x + 1"), noScope),
-        "(lam (num_add $0 1))"
+        "(lam1 (num_add $0 1))"
     );
 });
 
 test("multi-param arrow function with nested arithmetic", () => {
     assert.equal(
         convert(parseExpr("(x, y) => x + y * 2"), noScope),
-        "(lam (num_add $0 (num_mul $1 2)))"
+        "(lam2 (num_add $0 (num_mul $1 2)))"
     );
 });
 
@@ -64,25 +64,60 @@ test("arrow function with impure body (console.log) returns null", () => {
     );
 });
 
+test("zero-param arrow function with expression body encodes as lam0", () => {
+    assert.equal(
+        convert(parseExpr("() => 1 + 2"), noScope),
+        "(lam0 (num_add 1 2))"
+    );
+});
+
+test("three-param arrow function puts all three params at one scope level", () => {
+    assert.equal(
+        convert(parseExpr("(x: number, lo: number, hi: number) => x >= lo && x <= hi"), noScope),
+        "(lam3 (bool_and (num_gte $0 $1) (num_lte $0 $2)))"
+    );
+});
+
+test("block-bodied two-param arrow function wraps its define chain in lam2", () => {
+    assert.equal(
+        convert(parseExpr("(x: number, y: number) => { const s = x + y; return s * 2; }"), noScope),
+        "(lam2 (define (num_add $0 $1) (return (num_mul $0 2))))"
+    );
+});
+
+test("lam1 nested inside lam2 sees the outer level's two indices", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\n(a: number, b: number) => xs.map(x => x * a + b);"), noScope),
+        "(lam2 (array_map xs (lam1 (num_add (num_mul $0 $1) $2))))"
+    );
+});
+
+test("lam2 nested inside lam1 shifts the outer param by two", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\n(n: number) => xs.reduce((acc, x) => acc + x * n, 0);"), noScope),
+        "(lam1 (array_reduce xs (lam2 (num_add $0 (num_mul $1 $2))) 0))"
+    );
+});
+
 // Block-body arrow functions (define/seq)
 test("block body with single const declaration and return", () => {
     assert.equal(
         convert(parseExpr("(x) => { const y = x * 2; return y + 1; }"), noScope),
-        "(lam (define (num_mul $0 2) (return (num_add $0 1))))"
+        "(lam1 (define (num_mul $0 2) (return (num_add $0 1))))"
     );
 });
 
 test("block body with single let declaration and return (identical to const)", () => {
     assert.equal(
         convert(parseExpr("(x) => { let y = x * 2; return y + 1; }"), noScope),
-        "(lam (define (num_mul $0 2) (return (num_add $0 1))))"
+        "(lam1 (define (num_mul $0 2) (return (num_add $0 1))))"
     );
 });
 
 test("block body with two chained const declarations", () => {
     assert.equal(
         convert(parseExpr("(x) => { const a = x + 1; const b = a * 2; return b; }"), noScope),
-        "(lam (define (num_add $0 1) (define (num_mul $0 2) (return $0))))"
+        "(lam1 (define (num_add $0 1) (define (num_mul $0 2) (return $0))))"
     );
 });
 
@@ -110,21 +145,21 @@ test("block body with multi-declarator const returns null", () => {
 test("empty block body encodes as done", () => {
     assert.equal(
         convert(parseExpr("() => {}"), noScope),
-        "(lam done)"
+        "(lam0 done)"
     );
 });
 
 test("block body with no return statement encodes with done as the tail", () => {
     assert.equal(
         convert(parseExpr("(x) => { const a = x; }"), noScope),
-        "(lam (define $0 done))"
+        "(lam1 (define $0 done))"
     );
 });
 
 test("block body with bare return (no value) encodes as (return done)", () => {
     assert.equal(
         convert(parseExpr("(x) => { const a = 1; return; }"), noScope),
-        "(lam (define 1 (return done)))"
+        "(lam1 (define 1 (return done)))"
     );
 });
 
@@ -152,49 +187,49 @@ test("block body with a for-loop still returns null (for/while remain unsupporte
 test("return statement followed by unreachable code drops the unreachable code", () => {
     assert.equal(
         convert(parseExpr("(x) => { return x; const a = 1; }"), noScope),
-        "(lam (return $0))"
+        "(lam1 (return $0))"
     );
 });
 
 test("return statement followed by impure unreachable code does not affect purity", () => {
     assert.equal(
         convert(parseExpr("(x) => { return x; console.log(\"dead\"); }"), noScope),
-        "(lam (return $0))"
+        "(lam1 (return $0))"
     );
 });
 
 test("block body with bare expression statement then return", () => {
     assert.equal(
         convert(parseExpr("(x) => { x > 0; return x + 1; }"), noScope),
-        "(lam (seq (num_gt $0 0) (return (num_add $0 1))))"
+        "(lam1 (seq (num_gt $0 0) (return (num_add $0 1))))"
     );
 });
 
 test("block body mixing define and seq", () => {
     assert.equal(
         convert(parseExpr("(x, y) => { const a = 1; y; return a + x; }"), noScope),
-        "(lam (define 1 (seq $2 (return (num_add $0 $1)))))"
+        "(lam2 (define 1 (seq $2 (return (num_add $0 $1)))))"
     );
 });
 
 test("block body with bare expression statement and no return encodes with done", () => {
     assert.equal(
         convert(parseExpr("(x) => { x > 0; }"), noScope),
-        "(lam (seq (num_gt $0 0) done))"
+        "(lam1 (seq (num_gt $0 0) done))"
     );
 });
 
 test("block body with local interface and type declarations is skipped transparently", () => {
     assert.equal(
         convert(parseExpr("(x) => { interface Point { y: number } type Foo = number; return x; }"), noScope),
-        "(lam (return $0))"
+        "(lam1 (return $0))"
     );
 });
 
 test("block body with a local type declaration does not shift de Bruijn indices of surrounding statements", () => {
     assert.equal(
         convert(parseExpr("(x) => { type Foo = number; const a = x + 1; return a; }"), noScope),
-        "(lam (define (num_add $0 1) (return $0)))"
+        "(lam1 (define (num_add $0 1) (return $0)))"
     );
 });
 
@@ -384,42 +419,42 @@ test("false literal", () => {
 test("array map", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.map(x => x * 2);"), noScope),
-        "(array_map xs (lam (num_mul $0 2)))"
+        "(array_map xs (lam1 (num_mul $0 2)))"
     );
 });
 
 test("array filter", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.filter(x => x > 0);"), noScope),
-        "(array_filter xs (lam (num_gt $0 0)))"
+        "(array_filter xs (lam1 (num_gt $0 0)))"
     );
 });
 
 test("array flatMap", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.flatMap(x => x);"), noScope),
-        "(array_flatMap xs (lam $0))"
+        "(array_flatMap xs (lam1 $0))"
     );
 });
 
 test("array find", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.find(x => x > 0);"), noScope),
-        "(array_find xs (lam (num_gt $0 0)))"
+        "(array_find xs (lam1 (num_gt $0 0)))"
     );
 });
 
 test("array some", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.some(x => x > 0);"), noScope),
-        "(array_some xs (lam (num_gt $0 0)))"
+        "(array_some xs (lam1 (num_gt $0 0)))"
     );
 });
 
 test("array every", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.every(x => x > 0);"), noScope),
-        "(array_every xs (lam (num_gt $0 0)))"
+        "(array_every xs (lam1 (num_gt $0 0)))"
     );
 });
 
@@ -447,7 +482,7 @@ test("array method call with extra argument returns null", () => {
 test("array method chaining", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.map(x => x * 2).filter(x => x > 0);"), noScope),
-        "(array_filter (array_map xs (lam (num_mul $0 2))) (lam (num_gt $0 0)))"
+        "(array_filter (array_map xs (lam1 (num_mul $0 2))) (lam1 (num_gt $0 0)))"
     );
 });
 
@@ -468,7 +503,7 @@ test("array method callback that fails the purity check returns null", () => {
 test("array reduce with initial value", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.reduce((acc, x) => acc + x, 0);"), noScope),
-        "(array_reduce xs (lam (num_add $0 $1)) 0)"
+        "(array_reduce xs (lam2 (num_add $0 $1)) 0)"
     );
 });
 
@@ -491,42 +526,42 @@ test("unsupported node (call expression) returns null", () => {
 test("if/else as the last statement of a block, both branches returning, sits directly in tail position", () => {
     assert.equal(
         convert(parseExpr("(x) => { if (x > 0) { return x; } else { return -x; } }"), noScope),
-        "(lam (if (num_gt $0 0) (return $0) (return (num_neg $0))))"
+        "(lam1 (if (num_gt $0 0) (return $0) (return (num_neg $0))))"
     );
 });
 
 test("terminal guard clause with no else — else child is done", () => {
     assert.equal(
         convert(parseExpr("(x) => { if (x < 0) { return 0; } }"), noScope),
-        "(lam (if (num_lt $0 0) (return 0) done))"
+        "(lam1 (if (num_lt $0 0) (return 0) done))"
     );
 });
 
 test("if with no else, more code follows — else child is done, rest is seq's second child", () => {
     assert.equal(
         convert(parseExpr("(x) => { if (x > 0) { x * 2; } x + 1; }"), noScope),
-        "(lam (seq (if (num_gt $0 0) (seq (num_mul $0 2) done) done) (seq (num_add $0 1) done)))"
+        "(lam1 (seq (if (num_gt $0 0) (seq (num_mul $0 2) done) done) (seq (num_add $0 1) done)))"
     );
 });
 
 test("else if chains to a nested if with no extra operator", () => {
     assert.equal(
         convert(parseExpr("(x) => { if (x > 0) { return 1; } else if (x < 0) { return -1; } else { return 0; } }"), noScope),
-        "(lam (if (num_gt $0 0) (return 1) (if (num_lt $0 0) (return (num_neg 1)) (return 0))))"
+        "(lam1 (if (num_gt $0 0) (return 1) (if (num_lt $0 0) (return (num_neg 1)) (return 0))))"
     );
 });
 
 test("if condition of plain boolean type (not a comparison) is accepted", () => {
     assert.equal(
         convert(parseExpr("(x: boolean) => { if (x) { return 1; } return 0; }"), noScope),
-        "(lam (seq (if $0 (return 1) done) (return 0)))"
+        "(lam1 (seq (if $0 (return 1) done) (return 0)))"
     );
 });
 
 test("if condition with a literal boolean is accepted", () => {
     assert.equal(
         convert(parseExpr("(x) => { if (true) { return 1; } return 0; }"), noScope),
-        "(lam (seq (if true (return 1) done) (return 0)))"
+        "(lam1 (seq (if true (return 1) done) (return 0)))"
     );
 });
 
@@ -568,7 +603,7 @@ test("while-loop still returns null (for/while remain unsupported)", () => {
 test("dead code after a nested return inside an if-branch does not affect purity", () => {
     assert.equal(
         convert(parseExpr('(x) => { if (x > 0) { return 1; console.log("dead"); } return 0; }'), noScope),
-        "(lam (seq (if (num_gt $0 0) (return 1) done) (return 0)))"
+        "(lam1 (seq (if (num_gt $0 0) (return 1) done) (return 0)))"
     );
 });
 

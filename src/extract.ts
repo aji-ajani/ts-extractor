@@ -257,13 +257,13 @@ export function convert(node: Node, scope: Scope): string | null {
             if (!isBlockPure(statements)) return null; // impure closures are not DSR-eligible; dead code after `return` (including inside if-branches) is excluded
             const inner = convertBlockStatements(statements, 0, [{params}, ...scope]);
             if (inner === null) return null;
-            return `(lam ${inner})`;
+            return `(lam${params.length} ${inner})`;
         }
 
         if (!isPure(body)) return null; // impure closures are not DSR-eligible
         const inner = convert(body, [{params}, ...scope]);
         if (inner === null) return null; // propagate body parse failure upwards
-        return `(lam ${inner})`
+        return `(lam${params.length} ${inner})`
     }
 
     if (Node.isCallExpression(node)) {
