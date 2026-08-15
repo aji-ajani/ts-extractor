@@ -400,6 +400,35 @@ test("ternary over a comparison condition", () => {
     );
 });
 
+// Parenthesized expressions
+test("parenthesized subexpression is transparent", () => {
+    assert.equal(
+        convert(parseExpr("(2 + 3) * 4"), noScope),
+        "(num_mul (num_add 2 3) 4)"
+    );
+});
+
+test("redundant parentheses around a bare identifier are transparent", () => {
+    assert.equal(
+        convert(parseExpr("(x)"), noScope),
+        "x"
+    );
+});
+
+test("nested parentheses collapse", () => {
+    assert.equal(
+        convert(parseExpr("((1 + 2))"), noScope),
+        "(num_add 1 2)"
+    );
+});
+
+test("parenthesized subexpression inside a lambda body keeps de Bruijn indices", () => {
+    assert.equal(
+        convert(parseExpr("(x: number) => (x + 1) * 2"), noScope),
+        "(lam1 (num_mul (num_add $0 1) 2))"
+    );
+});
+
 // Boolean literals
 test("true literal", () => {
     assert.equal(

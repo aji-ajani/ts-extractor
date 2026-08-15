@@ -175,6 +175,12 @@ export function convert(node: Node, scope: Scope): string | null {
         return node.getText(); // "true" / "false"
     }
 
+    if (Node.isParenthesizedExpression(node)) {
+        // Parens carry no semantic content beyond the grouping the parser has already
+        // applied, so they are transparent to the encoding.
+        return convert(node.getExpression(), scope);
+    }
+
     if (Node.isPrefixUnaryExpression(node)) {
         const operatorToken = node.getOperatorToken();
         const operand = convert(node.getOperand(), scope);
