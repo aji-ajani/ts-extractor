@@ -543,10 +543,95 @@ test("array reduce without initial value returns null", () => {
     );
 });
 
-// Unsupported node
-test("unsupported node (call expression) returns null", () => {
+// Function calls (app)
+test("call with one argument", () => {
     assert.equal(
         convert(parseExpr("f(x)"), noScope),
+        "(app f x)"
+    );
+});
+
+test("call with no arguments", () => {
+    assert.equal(
+        convert(parseExpr("f()"), noScope),
+        "(app f)"
+    );
+});
+
+test("call with two arguments keeps source order", () => {
+    assert.equal(
+        convert(parseExpr("f(x, 1)"), noScope),
+        "(app f x 1)"
+    );
+});
+
+test("bound callee and bound argument resolve to de Bruijn indices", () => {
+    assert.equal(
+        convert(parseExpr("(f: (n: number) => number, x: number) => f(x)"), noScope),
+        "(lam2 (app $0 $1))"
+    );
+});
+
+test("call inside a nested lambda offsets the outer level by its parameter count", () => {
+    assert.equal(
+        convert(parseExpr("(xs: number[], f: (n: number) => number) => xs.map(x => f(x))"), noScope),
+        "(lam2 (array_map $0 (lam1 (app $2 $0))))"
+    );
+});
+
+test("immediately-invoked arrow function encodes as an app of a lam", () => {
+    assert.equal(
+        convert(parseExpr("((x: number) => x)(3)"), noScope),
+        "(app (lam1 $0) 3)"
+    );
+});
+
+test("curried call nests app in the callee position", () => {
+    assert.equal(
+        convert(parseExpr("k(1)(2)"), noScope),
+        "(app (app k 1) 2)"
+    );
+});
+
+test("type arguments are erased, not rejected", () => {
+    assert.equal(
+        convert(parseExpr("h<number>(1)"), noScope),
+        "(app h 1)"
+    );
+});
+
+test("optional call returns null", () => {
+    assert.equal(
+        convert(parseExpr("f?.(1)"), noScope),
+        null
+    );
+});
+
+test("spread argument returns null", () => {
+    assert.equal(
+        convert(parseExpr("f(...xs)"), noScope),
+        null
+    );
+});
+
+test("element-access callee returns null", () => {
+    assert.equal(
+        convert(parseExpr("fs[0](1)"), noScope),
+        null
+    );
+});
+
+test("argument that fails to convert drops the whole call", () => {
+    assert.equal(
+        convert(parseExpr("f(new Date())"), noScope),
+        null
+    );
+});
+
+// Unsupported node
+test("unsupported node (array literal) returns null", () => {
+    assert.equal(
+        convert(parseExpr("[1, 2]"), noScope),
         null
     );
 });

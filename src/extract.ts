@@ -158,6 +158,13 @@ export function convertProgram(sourceFile: SourceFile): string | null {
     return convertBlockStatements(statements, 0, []);
 }
 
+function convertCallee(callee: Node, scope: Scope): string | null {
+    // Identifier, parenthesized expression, inline arrow (IIFE), or a nested call — all of
+    // which `convert` already handles. Property-access callees are not supported yet.
+    if (Node.isPropertyAccessExpression(callee)) return null;
+    return convert(callee, scope);
+}
+
 export function convert(node: Node, scope: Scope): string | null {
     if (Node.isNumericLiteral(node)) {
         return node.getText();
@@ -177,7 +184,7 @@ export function convert(node: Node, scope: Scope): string | null {
 
     if (Node.isParenthesizedExpression(node)) {
         // Parens carry no semantic content beyond the grouping the parser has already
-        // applied, so they are transparent to the encoding.
+        // applied, so they are ignored.
         return convert(node.getExpression(), scope);
     }
 
@@ -273,29 +280,52 @@ export function convert(node: Node, scope: Scope): string | null {
     }
 
     if (Node.isCallExpression(node)) {
-        const callee = node.getExpression();
-        if (!Node.isPropertyAccessExpression(callee)) return null; // only method calls are supported
+        if (node.compilerNode.questionDotToken !== undefined) return null; // f?.(x)
 
-        const receiverNode = callee.getExpression();
-        if (!receiverNode.getType().isArray()) return null; // only Array.* methods are encoded
-
-        const methodName = callee.getName();
         const args = node.getArguments();
-        const receiver = convert(receiverNode, scope);
-        if (receiver === null) return null;
+        if (args.some((arg) => Node.isSpreadElement(arg))) return null; // no DSL term for splatting an array into a parameter list
 
-        if (methodName in ARRAY_OPS && args.length === 1) {
-            const callback = convert(args[0], scope);
-            if (callback === null) return null;
-            return `(${ARRAY_OPS[methodName]} ${receiver} ${callback})`;
+        const callee = node.getExpression();
+
+        if (Node.isPropertyAccessExpression(callee)) {
+            const receiverNode = callee.getExpression();
+            const methodName = callee.getName();
+
+            if (receiverNode.getType().isArray() && (methodName in ARRAY_OPS || methodName === "reduce")) {
+                const receiver = convert(receiverNode, scope);
+                if (receiver === null) return null;
+
+                if (methodName in ARRAY_OPS && args.length === 1) {
+                    const callback = convert(args[0], scope);
+                    if (callback === null) return null;
+                    return `(${ARRAY_OPS[methodName]} ${receiver} ${callback})`;
+                }
+
+                if (methodName === "reduce" && args.length === 2) {
+                    const callback = convert(args[0], scope);
+                    const init = convert(args[1], scope);
+                    if (callback === null || init === null) return null;
+                    return `(array_reduce ${receiver} ${callback} ${init})`;
+                }
+
+                // This branch owns the call: the receiver is an array and the method is one
+                // it handles, so a call-shape mismatch (a thisArg, an unseeded reduce) drops
+                // the call rather than falling through to a second encoding as `app`.
+                return null;
+            }
         }
 
-        if (methodName === "reduce" && args.length === 2) {
-            const callback = convert(args[0], scope);
-            const init = convert(args[1], scope);
-            if (callback === null || init === null) return null;
-            return `(array_reduce ${receiver} ${callback} ${init})`;
+        const fn = convertCallee(callee, scope);
+        if (fn === null) return null;
+
+        const encodedArgs: string[] = [];
+        for (const arg of args) {
+            const encoded = convert(arg, scope);
+            if (encoded === null) return null; // propagate argument parse failures upwards
+            encodedArgs.push(encoded);
         }
+
+        return `(app ${[fn, ...encodedArgs].join(" ")})`;
     }
 
     return null;
