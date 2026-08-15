@@ -158,11 +158,30 @@ export function convertProgram(sourceFile: SourceFile): string | null {
     return convertBlockStatements(statements, 0, []);
 }
 
+function dottedSymbol(node: Node, scope: Scope): string | null {
+    // A property-access callee encodes as one opaque free symbol ("Math.floor", "R.map").
+    // Built by walking the chain rather than from getText(), so optional chaining and
+    // incidental whitespace/comments can never yield two spellings of the same symbol.
+    const segments: string[] = [];
+    let current: Node = node;
+
+    while (Node.isPropertyAccessExpression(current)) {
+        if (current.compilerNode.questionDotToken !== undefined) return null; // a?.b.c
+        segments.unshift(current.getName());
+        current = current.getExpression();
+    }
+
+    if (!Node.isIdentifier(current)) return null; // this.f(), fs[0].g(), h().g() — no symbol to name
+
+    const root = current.getText();
+    if (lookup(root, scope) !== root) return null; // bound root: "$0.foo" is not a spellable symbol
+
+    return [root, ...segments].join(".");
+}
+
 function convertCallee(callee: Node, scope: Scope): string | null {
-    // Identifier, parenthesized expression, inline arrow (IIFE), or a nested call — all of
-    // which `convert` already handles. Property-access callees are not supported yet.
-    if (Node.isPropertyAccessExpression(callee)) return null;
-    return convert(callee, scope);
+    if (Node.isPropertyAccessExpression(callee)) return dottedSymbol(callee, scope);
+    return convert(callee, scope); // Identifier, parenthesized expression, inline arrow (IIFE), or a nested call.
 }
 
 export function convert(node: Node, scope: Scope): string | null {

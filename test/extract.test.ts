@@ -487,20 +487,23 @@ test("array every", () => {
     );
 });
 
-test("non-array receiver is not encoded as an array method", () => {
+test("non-array receiver .map is a plain call, not an array method", () => {
     assert.equal(
         convert(parseLastExpr("declare const obj: { map: (f: unknown) => unknown };\nobj.map(x => x);"), noScope),
-        null
+        "(app obj.map (lam1 $0))"
     );
 });
 
-test("unrecognized method name on array receiver returns null", () => {
+test("array-receiver method the array branch does not handle falls through to app", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.join(',');"), noScope),
-        null
+        "(app xs.join \",\")"
     );
 });
 
+// These two must NOT become `app` terms: the array branch owns `map`/`reduce` on an array
+// receiver, so a call-shape mismatch drops the call rather than producing a second encoding
+// of the same operation. See design-decisions.md on thisArg and unseeded reduce.
 test("array method call with extra argument returns null", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.map(x => x, undefined);"), noScope),
@@ -536,6 +539,9 @@ test("array reduce with initial value", () => {
     );
 });
 
+// These two must NOT become `app` terms: the array branch owns `map`/`reduce` on an array
+// receiver, so a call-shape mismatch drops the call rather than producing a second encoding
+// of the same operation. See design-decisions.md on thisArg and unseeded reduce.
 test("array reduce without initial value returns null", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.reduce((acc, x) => acc + x);"), noScope),
@@ -624,6 +630,48 @@ test("element-access callee returns null", () => {
 test("argument that fails to convert drops the whole call", () => {
     assert.equal(
         convert(parseExpr("f(new Date())"), noScope),
+        null
+    );
+});
+
+test("dotted callee on a free root encodes as one opaque symbol", () => {
+    assert.equal(
+        convert(parseExpr("Math.floor(1.5)"), noScope),
+        "(app Math.floor 1.5)"
+    );
+});
+
+test("multi-segment dotted callee joins every segment", () => {
+    assert.equal(
+        convert(parseExpr("obj.a.b.c(1)"), noScope),
+        "(app obj.a.b.c 1)"
+    );
+});
+
+test("library-style call encodes its arguments in source order", () => {
+    assert.equal(
+        convert(parseExpr("R.map(f, xs)"), noScope),
+        "(app R.map f xs)"
+    );
+});
+
+test("dotted callee with a bound root returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x: {foo: () => number}) => x.foo()"), noScope),
+        null
+    );
+});
+
+test("optional chaining inside a dotted callee returns null", () => {
+    assert.equal(
+        convert(parseExpr("a?.b.c(1)"), noScope),
+        null
+    );
+});
+
+test("this-rooted callee returns null", () => {
+    assert.equal(
+        convert(parseExpr("this.f(1)"), noScope),
         null
     );
 });
