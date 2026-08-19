@@ -549,6 +549,49 @@ test("array reduce without initial value returns null", () => {
     );
 });
 
+// `ARRAY_OPS` is an object literal, so a naive `methodName in ARRAY_OPS` also matches inherited
+// Object.prototype members (hasOwnProperty, toString, valueOf, toLocaleString) — see
+// design-decisions.md / the "in walks the prototype chain" fix.
+test("hasOwnProperty on an array receiver is a plain call, not a mis-owned array op", () => {
+    assert.equal(
+        convert(parseLastExpr('declare const xs: number[];\nxs.hasOwnProperty("length");'), noScope),
+        '(app xs.hasOwnProperty "length")'
+    );
+});
+
+test("toString on an array receiver now encodes as app instead of being wrongly suppressed", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[];\nxs.toString();"), noScope),
+        "(app xs.toString)"
+    );
+});
+
+// Tuple and union-of-array receivers must still be *claimed* by the array-method ownership
+// guard (so a call-shape mismatch drops the call) even though they are not eligible for
+// `array_*` encoding itself — see design-decisions.md, "Receiver-type check is `.isArray()`
+// only." Falling through to `app` here would silently re-admit a `thisArg` or an unseeded
+// `reduce`, both deliberately unsupported.
+test("tuple receiver with unseeded reduce still returns null, not a second app encoding", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: [number, number];\nxs.reduce((a, b) => a + b);"), noScope),
+        null
+    );
+});
+
+test("tuple receiver with a thisArg still returns null, not a second app encoding", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: [number, number];\nxs.map(x => x, undefined);"), noScope),
+        null
+    );
+});
+
+test("union-of-arrays receiver .map still returns null, not a second app encoding", () => {
+    assert.equal(
+        convert(parseLastExpr("declare const xs: number[] | string[];\nxs.map(f);"), noScope),
+        null
+    );
+});
+
 // Function calls (app)
 test("call with one argument", () => {
     assert.equal(
@@ -673,6 +716,27 @@ test("this-rooted callee returns null", () => {
     assert.equal(
         convert(parseExpr("this.f(1)"), noScope),
         null
+    );
+});
+
+test("free dotted root nested inside two lambdas", () => {
+    assert.equal(
+        convert(parseExpr("(x) => (y) => M.foo(x, y)"), noScope),
+        "(lam1 (lam1 (app M.foo $1 $0)))"
+    );
+});
+
+test("bound dotted root at a non-innermost scope depth still returns null", () => {
+    assert.equal(
+        convert(parseExpr("(x) => (y) => x.foo()"), noScope),
+        null
+    );
+});
+
+test("a call whose callee is itself a zero-argument call", () => {
+    assert.equal(
+        convert(parseExpr("f()()"), noScope),
+        "(app (app f))"
     );
 });
 
@@ -851,5 +915,14 @@ test("export default is encoded as seq, not terminal — later statements still 
     assert.equal(
         convertProgram(parseFile("const a = 1;\nexport default a + 1;\na + 2;")),
         "(define 1 (seq (num_add $0 1) (seq (num_add $0 2) done)))"
+    );
+});
+
+// The seam between file-level define/seq sequencing and the app operator — nothing else
+// asserts that a top-level call composes correctly with convertProgram's scope threading.
+test("file-level call composes with define/seq sequencing", () => {
+    assert.equal(
+        convertProgram(parseFile("const f = (x: number) => x;\nf(1);")),
+        "(define (lam1 $0) (seq (app $0 1) done))"
     );
 });

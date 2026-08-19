@@ -12,6 +12,17 @@ const ARRAY_OPS: Record<string, string> = {
     // reduce is handled separately
 };
 
+function isArrayLikeReceiver(type: ReturnType<Node["getType"]>): boolean {
+    // Ownership test for the array-method branch. Widened beyond plain `.isArray()` so tuple
+    // and union-of-array receivers are still claimed (and correctly dropped on a call-shape
+    // mismatch) rather than falling through to a second `app` encoding of the same call. The
+    // *encoding* path below still requires `.isArray()` exactly as before — this only affects
+    // who owns the call, not which receivers get `array_*` operators (see extractor-design-decisions.md).
+    if (type.isArray() || type.isTuple()) return true;
+    if (type.isUnion()) return type.getUnionTypes().some((t) => t.isArray() || t.isTuple());
+    return false;
+}
+
 function reachableStatements(statements: Statement[]): Statement[] {
     const returnIndex = statements.findIndex((s) => Node.isReturnStatement(s));
     return returnIndex === -1 ? statements : statements.slice(0, returnIndex + 1);
@@ -310,17 +321,17 @@ export function convert(node: Node, scope: Scope): string | null {
             const receiverNode = callee.getExpression();
             const methodName = callee.getName();
 
-            if (receiverNode.getType().isArray() && (methodName in ARRAY_OPS || methodName === "reduce")) {
+            if (isArrayLikeReceiver(receiverNode.getType()) && (Object.hasOwn(ARRAY_OPS, methodName) || methodName === "reduce")) {
                 const receiver = convert(receiverNode, scope);
                 if (receiver === null) return null;
 
-                if (methodName in ARRAY_OPS && args.length === 1) {
+                if (Object.hasOwn(ARRAY_OPS, methodName) && args.length === 1 && receiverNode.getType().isArray()) {
                     const callback = convert(args[0], scope);
                     if (callback === null) return null;
                     return `(${ARRAY_OPS[methodName]} ${receiver} ${callback})`;
                 }
 
-                if (methodName === "reduce" && args.length === 2) {
+                if (methodName === "reduce" && args.length === 2 && receiverNode.getType().isArray()) {
                     const callback = convert(args[0], scope);
                     const init = convert(args[1], scope);
                     if (callback === null || init === null) return null;
