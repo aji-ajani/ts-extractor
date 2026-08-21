@@ -1,5 +1,5 @@
 import {Node, SyntaxKind, Statement, VariableDeclarationKind, SourceFile, IfStatement} from "ts-morph"
-import {Scope, lookup} from "./scope"
+import {Scope, lookup, pushParams} from "./scope"
 import {isPure} from "./purity"
 
 const ARRAY_OPS: Record<string, string> = {
@@ -112,7 +112,7 @@ function convertBlockStatements(statements: Statement[], index: number, scope: S
         const value = convert(initializer, scope);
         if (value === null) return null;
 
-        const rest = convertBlockStatements(statements, index + 1, [{params: [nameNode.getText()]}, ...scope]);
+        const rest = convertBlockStatements(statements, index + 1, pushParams([nameNode.getText()], scope));
         if (rest === null) return null;
         return `(define ${value} ${rest})`;
     }
@@ -298,13 +298,13 @@ export function convert(node: Node, scope: Scope): string | null {
         if (Node.isBlock(body)) {
             const statements = reachableStatements(body.getStatements());
             if (!isBlockPure(statements)) return null; // impure closures are not DSR-eligible; dead code after `return` (including inside if-branches) is excluded
-            const inner = convertBlockStatements(statements, 0, [{params}, ...scope]);
+            const inner = convertBlockStatements(statements, 0, pushParams(params, scope));
             if (inner === null) return null;
             return `(lam${params.length} ${inner})`;
         }
 
         if (!isPure(body)) return null; // impure closures are not DSR-eligible
-        const inner = convert(body, [{params}, ...scope]);
+        const inner = convert(body, pushParams(params, scope));
         if (inner === null) return null; // propagate body parse failure upwards
         return `(lam${params.length} ${inner})`
     }
