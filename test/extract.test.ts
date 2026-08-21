@@ -50,10 +50,10 @@ test("single-param arrow function with arithmetic body", () => {
     );
 });
 
-test("multi-param arrow function with nested arithmetic", () => {
+test("multi-param arrow function numbers right-to-left: y=$0, x=$1", () => {
     assert.equal(
         convert(parseExpr("(x, y) => x + y * 2"), noScope),
-        "(lam2 (num_add $0 (num_mul $1 2)))"
+        "(lam2 (num_add $1 (num_mul $0 2)))"
     );
 });
 
@@ -74,28 +74,28 @@ test("zero-param arrow function with expression body encodes as lam0", () => {
 test("three-param arrow function puts all three params at one scope level", () => {
     assert.equal(
         convert(parseExpr("(x: number, lo: number, hi: number) => x >= lo && x <= hi"), noScope),
-        "(lam3 (bool_and (num_gte $0 $1) (num_lte $0 $2)))"
+        "(lam3 (bool_and (num_gte $2 $1) (num_lte $2 $0)))"
     );
 });
 
 test("block-bodied two-param arrow function wraps its define chain in lam2", () => {
     assert.equal(
         convert(parseExpr("(x: number, y: number) => { const s = x + y; return s * 2; }"), noScope),
-        "(lam2 (define (num_add $0 $1) (return (num_mul $0 2))))"
+        "(lam2 (define (num_add $1 $0) (return (num_mul $0 2))))"
     );
 });
 
-test("lam1 nested inside lam2 sees the outer level's two indices", () => {
+test("lam1 nested inside lam2 sees the outer level's two indices, last param nearest", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\n(a: number, b: number) => xs.map(x => x * a + b);"), noScope),
-        "(lam2 (array_map xs (lam1 (num_add (num_mul $0 $1) $2))))"
+        "(lam2 (array_map xs (lam1 (num_add (num_mul $0 $2) $1))))"
     );
 });
 
 test("lam2 nested inside lam1 shifts the outer param by two", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\n(n: number) => xs.reduce((acc, x) => acc + x * n, 0);"), noScope),
-        "(lam1 (array_reduce xs (lam2 (num_add $0 (num_mul $1 $2))) 0))"
+        "(lam1 (array_reduce xs (lam2 (num_add $1 (num_mul $0 $2))) 0))"
     );
 });
 
@@ -208,7 +208,7 @@ test("block body with bare expression statement then return", () => {
 test("block body mixing define and seq", () => {
     assert.equal(
         convert(parseExpr("(x, y) => { const a = 1; y; return a + x; }"), noScope),
-        "(lam2 (define 1 (seq $2 (return (num_add $0 $1)))))"
+        "(lam2 (define 1 (seq $1 (return (num_add $0 $2)))))"
     );
 });
 
@@ -535,7 +535,7 @@ test("array method callback that fails the purity check returns null", () => {
 test("array reduce with initial value", () => {
     assert.equal(
         convert(parseLastExpr("declare const xs: number[];\nxs.reduce((acc, x) => acc + x, 0);"), noScope),
-        "(array_reduce xs (lam2 (num_add $0 $1)) 0)"
+        "(array_reduce xs (lam2 (num_add $1 $0)) 0)"
     );
 });
 
@@ -617,14 +617,14 @@ test("call with two arguments keeps source order", () => {
 test("bound callee and bound argument resolve to de Bruijn indices", () => {
     assert.equal(
         convert(parseExpr("(f: (n: number) => number, x: number) => f(x)"), noScope),
-        "(lam2 (app $0 $1))"
+        "(lam2 (app $1 $0))"
     );
 });
 
 test("call inside a nested lambda offsets the outer level by its parameter count", () => {
     assert.equal(
         convert(parseExpr("(xs: number[], f: (n: number) => number) => xs.map(x => f(x))"), noScope),
-        "(lam2 (array_map $0 (lam1 (app $2 $0))))"
+        "(lam2 (array_map $1 (lam1 (app $1 $0))))"
     );
 });
 
@@ -924,5 +924,31 @@ test("file-level call composes with define/seq sequencing", () => {
     assert.equal(
         convertProgram(parseFile("const f = (x: number) => x;\nf(1);")),
         "(define (lam1 $0) (seq (app $0 1) done))"
+    );
+});
+
+// --- de Bruijn numbering convention: $0 is the LAST parameter ---
+// These are deliberately asymmetric at arity >= 2. Under the old left-to-right
+// convention each one produces a term that egg-stitch reads as a *different program*
+// (operands swapped), not merely a differently-spelled one.
+
+test("arity-2 subtraction pins right-to-left numbering: (a, b) => a - b", () => {
+    assert.equal(
+        convert(parseExpr("(a: number, b: number) => a - b"), noScope),
+        "(lam2 (num_sub $1 $0))"
+    );
+});
+
+test("arity-2 lambda using only its first parameter still yields $1", () => {
+    assert.equal(
+        convert(parseExpr("(a: number, b: number) => a * 2"), noScope),
+        "(lam2 (num_mul $1 2))"
+    );
+});
+
+test("arity-2 lambda using only its last parameter yields $0", () => {
+    assert.equal(
+        convert(parseExpr("(a: number, b: number) => b * 2"), noScope),
+        "(lam2 (num_mul $0 2))"
     );
 });
